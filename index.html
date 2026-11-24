@@ -190,6 +190,123 @@ function fmtDur(s){
 }
 function label(h){ return h>=2160?"4K":h>=1440?"1440p":h+"p"; }
 
+/* ---------- YouTube backup route (runs in the visitor's browser) ----------
+   If YouTube blocks the server, the page gets the streams from public
+   Invidious / Piped mirrors and joins video+audio in the browser (ffmpeg.wasm). */
+const INVIDIOUS = ["https://yt.chocolatemoo53.com","https://inv.nadeko.net","https://invidious.nerdvpn.de","https://yewtu.be",
+  "https://invidious.f5.si","https://inv.tux.pizza","https://invidious.tiekoetter.com","https://iv.ggtyler.dev"];
+const PIPED = ["https://api.piped.private.coffee","https://pipedapi.kavin.rocks","https://pipedapi.adminforge.de","https://pipedapi.leptons.xyz",
+  "https://piped-api.lunar.icu","https://pipedapi.r4fo.com","https://pipedapi.reallyaweso.me","https://api.piped.yt"];
+
+function ytId(u){
+  try{
+    const x = new URL(u), h = x.hostname.replace(/^www\.|^m\.|^music\./,"");
+    if(h==="youtu.be") return x.pathname.slice(1,12);
+    if(!/(^|\.)youtube(-nocookie)?\.com$/.test(h)) return null;
+    if(x.searchParams.get("v")) return x.searchParams.get("v").slice(0,11);
+    const m = x.pathname.match(/\/(shorts|embed|live|v)\/([\w-]{11})/);
+    return m ? m[2] : null;
+  }catch{ return null; }
+}
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_,no)=>setTimeout(()=>no(new Error("timeout")),ms))]);
+
+async function viaInvidious(host, id){
+  const r = await withTimeout(fetch(`${host}/api/v1/videos/${id}?local=true`), 12000);
+  if(!r.ok) throw new Error(host+" "+r.status);
+  const j = await r.json(), F = j.adaptiveFormats||[];
+  const abs = u => new URL(u, host).href;
+  const videos = F.filter(f=>/^video\/mp4/.test(f.type||"") && /avc1/.test(f.type||""))
+    .map(f=>({h:parseInt(f.qualityLabel)||parseInt((f.resolution||"").split("x")[1])||0, url:abs(f.url), size:+f.clen||0}));
+  const audios = F.filter(f=>/^audio\/mp4/.test(f.type||"")).map(f=>({url:abs(f.url), br:+f.bitrate||0}));
+  if(!videos.length && !audios.length) throw new Error("no streams");
+  const th = (j.videoThumbnails||[]).find(t=>t.quality==="medium")||(j.videoThumbnails||[])[0];
+  return {title:j.title, uploader:j.author, duration:j.lengthSeconds, thumbnail: th ? abs(th.url) : `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, videos, audios};
+}
+async function viaPiped(host, id){
+  const r = await withTimeout(fetch(`${host}/streams/${id}`), 12000);
+  if(!r.ok) throw new Error(host+" "+r.status);
+  const j = await r.json();
+  const videos = (j.videoStreams||[]).filter(s=>s.videoOnly && /mp4/.test(s.mimeType||"") && /avc1/.test(s.codec||"avc1"))
+    .map(s=>({h:parseInt(s.quality)||s.height||0, url:s.url, size:s.contentLength||0}));
+  const audios = (j.audioStreams||[]).filter(s=>/mp4/.test(s.mimeType||"")).map(s=>({url:s.url, br:s.bitrate||0}));
+  if(!videos.length && !audios.length) throw new Error("no streams");
+  return {title:j.title, uploader:j.uploader, duration:j.duration, thumbnail:j.thumbnailUrl||`https://i.ytimg.com/vi/${id}/hqdefault.jpg`, videos, audios};
+}
+async function ytBrowserInfo(id){
+  // ask every mirror at once; use the first one that answers properly
+  const d = await Promise.any([...INVIDIOUS.map(h=>viaInvidious(h,id)), ...PIPED.map(h=>viaPiped(h,id))]);
+  const best = {};
+  d.videos.forEach(v=>{ if(v.h && (!best[v.h] || v.size>best[v.h].size)) best[v.h]=v; });
+  d.videos = Object.values(best).sort((a,b)=>b.h-a.h);
+  d.audios.sort((a,b)=>b.br-a.br);
+  return {...d, site:"YouTube", heights:d.videos.map(v=>v.h), has_video:d.videos.length>0, has_audio:d.audios.length>0, browser:true};
+}
+
+let ffmpegReady = null;
+function loadFFmpeg(){
+  if(ffmpegReady) return ffmpegReady;
+  const B="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd", C="https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm";
+  const blobURL = async (u,t) => URL.createObjectURL(new Blob([await (await fetch(u)).arrayBuffer()],{type:t}));
+  ffmpegReady = (async()=>{
+    if(!window.FFmpegWASM) await new Promise((ok,no)=>{ const s=document.createElement("script"); s.src=B+"/ffmpeg.js"; s.onload=ok; s.onerror=no; document.head.appendChild(s); });
+    const ff = new FFmpegWASM.FFmpeg();
+    await ff.load({classWorkerURL:await blobURL(B+"/814.ffmpeg.js","text/javascript"),
+                   coreURL:await blobURL(C+"/ffmpeg-core.js","text/javascript"),
+                   wasmURL:await blobURL(C+"/ffmpeg-core.wasm","application/wasm")});
+    return ff;
+  })().catch(e=>{ ffmpegReady=null; throw e; });
+  return ffmpegReady;
+}
+
+async function grab(url, label, total){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error("Mirror refused the file ("+r.status+"). Try again.");
+  const size = +r.headers.get("content-length") || total || 0;
+  const reader = r.body.getReader(), parts=[]; let got=0;
+  for(;;){
+    const {done, value} = await reader.read(); if(done) break;
+    parts.push(value); got += value.length;
+    setStatus(`${label}… ${size ? Math.round(got/size*100)+"%" : (got/1048576).toFixed(1)+" MB"}`,"load");
+  }
+  const out = new Uint8Array(got); let o=0; parts.forEach(p=>{ out.set(p,o); o+=p.length; });
+  return out;
+}
+function saveBlob(data, type, name){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([data],{type})); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 60000);
+  setStatus("Saved: "+name);
+}
+const cleanName = t => (t||"video").replace(/[\\/:*?"<>|\n\r\t]+/g," ").replace(/\s+/g," ").trim().slice(0,150) || "video";
+
+async function browserDownload(){
+  const d = state.info, base = cleanName(d.title);
+  const v = d.videos.find(x=>x.h===state.h) || d.videos[0], a = d.audios[0];
+  if(state.mode==="mute"){
+    saveBlob(await grab(v.url,"Downloading video",v.size), "video/mp4", base+" (no sound).mp4");
+  }else if(state.mode==="audio"){
+    const aud = await grab(a.url,"Downloading audio");
+    if(state.afmt==="m4a"){ saveBlob(aud,"audio/mp4",base+".m4a"); return; }
+    setStatus("Converting to MP3…","load");
+    const ff = await loadFFmpeg();
+    await ff.writeFile("a.m4a", aud);
+    await ff.exec(["-i","a.m4a","-vn","-b:a","192k","out.mp3"]);
+    saveBlob(await ff.readFile("out.mp3"),"audio/mpeg",base+".mp3");
+    ["a.m4a","out.mp3"].forEach(f=>ff.deleteFile(f).catch(()=>{}));
+  }else{
+    const ffP = loadFFmpeg();
+    const vid = await grab(v.url,"Downloading video",v.size);
+    const aud = await grab(a.url,"Downloading audio");
+    setStatus("Joining video and sound…","load");
+    const ff = await ffP;
+    await ff.writeFile("v.mp4", vid); await ff.writeFile("a.m4a", aud);
+    await ff.exec(["-i","v.mp4","-i","a.m4a","-c","copy","-map","0:v:0","-map","1:a:0","-movflags","+faststart","out.mp4"]);
+    saveBlob(await ff.readFile("out.mp4"),"video/mp4",base+".mp4");
+    ["v.mp4","a.m4a","out.mp4"].forEach(f=>ff.deleteFile(f).catch(()=>{}));
+  }
+}
+
 async function fetchInfo(){
   const url = $("#url").value.trim();
   if(!/^https?:\/\//i.test(url)){ setStatus("Paste a full link that starts with https://","err"); return; }
@@ -197,15 +314,30 @@ async function fetchInfo(){
   $("#result").classList.remove("show");
   $("#go").disabled = true;
   setStatus("Fetching…","load");
+  let serverErr = null;
   try{
     const r = await fetch(API+"/api/info",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});
-    const d = await r.json();
+    const d = await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(d.error||"Something went wrong.");
     state.info = d;
     render();
     setStatus("");
-  }catch(e){ setStatus(e.message,"err"); }
-  finally{ $("#go").disabled = false; }
+    $("#go").disabled = false;
+    return;
+  }catch(e){ serverErr = e; }
+
+  const id = ytId(url);
+  if(id){
+    setStatus("Trying the YouTube backup route…","load");
+    try{
+      state.info = await ytBrowserInfo(id);
+      render();
+      setStatus("");
+    }catch(e){ setStatus("YouTube is busy right now. Please try again in a minute.","err"); }
+  }else{
+    setStatus(serverErr.message,"err");
+  }
+  $("#go").disabled = false;
 }
 
 function render(){
@@ -255,6 +387,12 @@ async function download(){
   const btn = $("#dl"), old = btn.textContent;
   btn.disabled = true; btn.textContent = "Preparing file…";
   setStatus("Preparing your file. Long videos take a little while.","load");
+  if(state.info && state.info.browser){
+    try{ await browserDownload(); }
+    catch(e){ setStatus(e.message || "Download failed.","err"); }
+    finally{ btn.disabled = false; btn.textContent = old; }
+    return;
+  }
   try{
     const r = await fetch(API+"/api/download?"+p);
     if(!r.ok){ const d = await r.json().catch(()=>({})); throw new Error(d.error||"Download failed."); }
