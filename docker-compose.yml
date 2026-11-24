@@ -1,4 +1,4 @@
-# GetFireFech: app + automatic HTTPS for your domain.
+# GetFireFech: app + YouTube PO-token helper + automatic HTTPS for your domain.
 #
 #   DOMAIN=getfirefech.com docker compose up -d --build
 #
@@ -9,11 +9,28 @@ services:
   app:
     build: .
     restart: unless-stopped
+    depends_on:
+      - bgutil
     environment:
       - MAX_DURATION_SECONDS=${MAX_DURATION_SECONDS:-10800}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - POT_PROVIDER_URL=http://bgutil:4416
+      - YTDLP_PROXY=${YTDLP_PROXY:-}
+      # Optional fallback, only used if YouTube still blocks:
+      # - COOKIES_FILE=/app/cookies.txt
+    # volumes:
+    #   - ./cookies.txt:/app/cookies.txt:ro
     expose:
       - "8000"
+
+  # Generates YouTube "proof of origin" tokens so the server isn't treated as a bot.
+  # Internal only: never publish its port to the internet.
+  bgutil:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    restart: unless-stopped
+    init: true
+    expose:
+      - "4416"
 
   caddy:
     image: caddy:2
