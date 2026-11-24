@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>GetFireFech — download any video</title>
+<meta name="description" content="Paste a link. Get the video in any quality, the sound only, or the video without sound.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+<style>
+  :root{
+    --bg:#000; --panel:#0d0d0d; --line:#1f1f1f; --text:#f5f5f5; --muted:#8a8a8a;
+    --fire1:#ff3d00; --fire2:#ff9100; --fire3:#ffd54f;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Inter,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;flex-direction:column}
+  a{color:inherit;text-decoration:none}
+  .wrap{width:100%;max-width:880px;margin:0 auto;padding:0 20px}
+
+  header{position:sticky;top:0;z-index:10;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  header .wrap{display:flex;align-items:center;justify-content:space-between;height:60px}
+  .logo{font-weight:800;letter-spacing:-.02em;font-size:18px;display:flex;align-items:center;gap:8px}
+  .logo .dot{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,var(--fire1),var(--fire3));box-shadow:0 0 14px var(--fire2)}
+  nav{display:flex;gap:22px;font-size:14px;color:var(--muted)}
+  nav a:hover{color:var(--text)}
+
+  .hero{position:relative;padding:96px 0 56px;text-align:center;overflow:hidden}
+  .hero::before{content:"";position:absolute;left:50%;top:-180px;width:720px;height:420px;transform:translateX(-50%);background:radial-gradient(closest-side,rgba(255,94,0,.28),transparent);pointer-events:none}
+  h1{position:relative;font-size:clamp(48px,11vw,112px);font-weight:900;letter-spacing:-.05em;line-height:.9;
+     background:linear-gradient(180deg,#fff 30%,var(--fire2) 75%,var(--fire1));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tag{position:relative;margin:22px auto 40px;color:var(--muted);font-size:clamp(15px,2.2vw,18px);max-width:560px}
+
+  form{position:relative;display:flex;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:calc(var(--radius) + 4px);padding:8px;max-width:680px;margin:0 auto;transition:border-color .2s,box-shadow .2s}
+  form:focus-within{border-color:#3a2414;box-shadow:0 0 0 4px rgba(255,94,0,.12)}
+  form label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  input[type=url]{flex:1;min-width:0;background:transparent;border:0;outline:0;color:var(--text);font-size:16px;padding:0 14px}
+  input::placeholder{color:#555}
+  .btn{border:0;cursor:pointer;font:inherit;font-weight:700;font-size:15px;border-radius:var(--radius);padding:13px 20px;transition:transform .1s,opacity .2s,background .2s;white-space:nowrap}
+  .btn:active{transform:scale(.97)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .ghost{background:#1a1a1a;color:var(--text)}
+  .ghost:hover{background:#242424}
+  .fire{background:linear-gradient(135deg,var(--fire1),var(--fire2));color:#000}
+  .fire:hover{filter:brightness(1.08)}
+
+  .status{min-height:24px;margin-top:16px;font-size:14px;color:var(--muted)}
+  .status.err{color:#ff6b6b}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid #444;border-top-color:var(--fire2);border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px;margin-right:8px}
+  @keyframes s{to{transform:rotate(360deg)}}
+
+  /* result card */
+  .result{display:none;max-width:680px;margin:20px auto 0;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:calc(var(--radius) + 4px);overflow:hidden;animation:up .35s ease}
+  .result.show{display:block}
+  @keyframes up{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .meta{display:flex;gap:16px;padding:16px;border-bottom:1px solid var(--line)}
+  .thumb{width:160px;aspect-ratio:16/9;border-radius:10px;background:#1a1a1a center/cover no-repeat;flex-shrink:0;position:relative}
+  .thumb span{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.8);font-size:12px;padding:1px 6px;border-radius:5px}
+  .meta h2{font-size:16px;font-weight:700;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .meta p{color:var(--muted);font-size:13px;margin-top:4px}
+  .opts{padding:16px;display:grid;gap:14px}
+  .tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;background:#060606;border:1px solid var(--line);border-radius:var(--radius);padding:5px}
+  .tabs button{background:transparent;border:0;color:var(--muted);font:inherit;font-size:14px;font-weight:600;padding:10px 6px;border-radius:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px}
+  .tabs button small{font-weight:400;font-size:11px;opacity:.7}
+  .tabs button[aria-pressed=true]{background:#1c1c1c;color:var(--text);box-shadow:inset 0 0 0 1px #2c2c2c}
+  .tabs button[aria-pressed=true] .ic{color:var(--fire2)}
+  .ic{font-size:18px}
+  .row{display:flex;gap:8px;align-items:center}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;flex:1}
+  .chip{background:#141414;border:1px solid var(--line);color:var(--text);font:inherit;font-size:13px;font-weight:600;padding:7px 12px;border-radius:999px;cursor:pointer}
+  .chip[aria-pressed=true]{border-color:var(--fire2);color:var(--fire2);background:rgba(255,145,0,.08)}
+  .dl{width:100%;padding:15px;font-size:16px}
+
+  section{padding:64px 0;border-top:1px solid var(--line)}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--fire2);font-weight:700}
+  h3{font-size:clamp(26px,4vw,36px);letter-spacing:-.03em;margin:8px 0 28px;font-weight:800}
+  .sites{display:flex;flex-wrap:wrap;gap:10px}
+  .sites li{list-style:none;border:1px solid var(--line);background:var(--panel);padding:10px 16px;border-radius:999px;font-size:14px;font-weight:600}
+  .sites li.more{border-style:dashed;color:var(--muted);font-weight:500}
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;counter-reset:n}
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px}
+  .step::before{counter-increment:n;content:counter(n,decimal-leading-zero);font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--fire2)}
+  .step h4{font-size:18px;margin:10px 0 6px}
+  .step p{color:var(--muted);font-size:14px}
+
+  footer{margin-top:auto;border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:13px}
+  footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+
+  @media (max-width:640px){
+    nav{gap:14px}
+    form{flex-wrap:wrap}
+    input[type=url]{flex-basis:100%;padding:12px}
+    form .btn{flex:1}
+    .meta{flex-direction:column}
+    .thumb{width:100%}
+    .steps{grid-template-columns:1fr}
+    .hero{padding-top:64px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <a href="#" class="logo"><span class="dot"></span>GetFireFech</a>
+    <nav><a href="#how">How it works</a><a href="#sites">Sites</a></nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <h1>GETFIREFECH</h1>
+      <p class="tag">Paste a link. Get the video in any quality, the sound only, or the video with no sound.</p>
+
+      <form id="f" autocomplete="off">
+        <label for="url">Video link</label>
+        <input id="url" type="url" inputmode="url" placeholder="Paste a YouTube, TikTok, Instagram… link" required>
+        <button type="button" class="btn ghost" id="paste">Paste</button>
+        <button type="submit" class="btn fire" id="go">Fetch</button>
+      </form>
+      <div class="status" id="status" role="status" aria-live="polite"></div>
+
+      <div class="result" id="result">
+        <div class="meta">
+          <div class="thumb" id="thumb"><span id="dur"></span></div>
+          <div><h2 id="title"></h2><p id="by"></p></div>
+        </div>
+        <div class="opts">
+          <div class="tabs" role="group" aria-label="Format">
+            <button type="button" data-mode="video" aria-pressed="true"><span class="ic">▶</span>Video<small>with sound</small></button>
+            <button type="button" data-mode="audio" aria-pressed="false"><span class="ic">♪</span>Audio<small>sound only</small></button>
+            <button type="button" data-mode="mute" aria-pressed="false"><span class="ic">🔇</span>No sound<small>video only</small></button>
+          </div>
+          <div class="row"><div class="chips" id="chips"></div></div>
+          <button class="btn fire dl" id="dl" type="button">Download</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section id="sites">
+    <div class="wrap">
+      <div class="eyebrow">Sites</div>
+      <h3>Works where your videos are.</h3>
+      <ul class="sites">
+        <li>YouTube</li><li>TikTok</li><li>Instagram</li><li>X</li><li>Facebook</li>
+        <li>Pinterest</li><li>SoundCloud</li><li>Twitch clips</li><li>Dailymotion</li><li>Vimeo</li><li>Reddit</li>
+        <li class="more">+ 1,000 more</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <div class="eyebrow">How it works</div>
+      <h3>Three steps. No sign-up.</h3>
+      <div class="steps">
+        <div class="step"><h4>Paste</h4><p>Copy the share link from the app or site and drop it in. Pasting starts the fetch on its own.</p></div>
+        <div class="step"><h4>Pick</h4><p>Video with sound, sound only, or video with no sound. Quality options depend on what the site offers.</p></div>
+        <div class="step"><h4>Save</h4><p>The file downloads to your device, named after the video's title. Nothing is kept on our server.</p></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Only download videos you own or have permission to save.</span>
+    <span>© <span id="yr"></span> GetFireFech</span>
+  </div>
+</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const API = ""; // same origin; set to your backend URL if hosted separately
+const state = { url:"", info:null, mode:"video", h:null, afmt:"mp3" };
+$("#yr").textContent = new Date().getFullYear();
+
+function setStatus(msg, kind){
+  const el = $("#status");
+  el.className = "status" + (kind==="err" ? " err" : "");
+  el.innerHTML = kind==="load" ? `<span class="spin"></span>${msg}` : msg;
+}
+function fmtDur(s){
+  if(!s) return "";
+  s = Math.round(s);
+  const h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = String(s%60).padStart(2,"0");
+  return h ? `${h}:${String(m).padStart(2,"0")}:${x}` : `${m}:${x}`;
+}
+function label(h){ return h>=2160?"4K":h>=1440?"1440p":h+"p"; }
+
+async function fetchInfo(){
+  const url = $("#url").value.trim();
+  if(!/^https?:\/\//i.test(url)){ setStatus("Paste a full link that starts with https://","err"); return; }
+  state.url = url;
+  $("#result").classList.remove("show");
+  $("#go").disabled = true;
+  setStatus("Fetching…","load");
+  try{
+    const r = await fetch(API+"/api/info",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||"Something went wrong.");
+    state.info = d;
+    render();
+    setStatus("");
+  }catch(e){ setStatus(e.message,"err"); }
+  finally{ $("#go").disabled = false; }
+}
+
+function render(){
+  const d = state.info;
+  $("#title").textContent = d.title;
+  $("#by").textContent = [d.uploader, d.site].filter(Boolean).join(" · ");
+  $("#thumb").style.backgroundImage = d.thumbnail ? `url("${d.thumbnail}")` : "";
+  $("#dur").textContent = fmtDur(d.duration);
+  $("#dur").style.display = d.duration ? "" : "none";
+  document.querySelectorAll(".tabs button").forEach(b=>{
+    const m = b.dataset.mode;
+    b.disabled = (m!=="audio" && !d.has_video) || (m==="audio" && !d.has_audio);
+  });
+  if(!d.has_video) state.mode = "audio";
+  setMode(state.mode);
+  $("#result").classList.add("show");
+}
+
+function setMode(mode){
+  state.mode = mode;
+  document.querySelectorAll(".tabs button").forEach(b=>b.setAttribute("aria-pressed", b.dataset.mode===mode));
+  const chips = $("#chips"); chips.innerHTML = "";
+  let opts;
+  if(mode==="audio"){
+    opts = [{v:"mp3",t:"MP3 · 320k"},{v:"m4a",t:"M4A · original"}];
+    if(!opts.some(o=>o.v===state.afmt)) state.afmt="mp3";
+  }else{
+    const hs = (state.info.heights||[]).filter(h=>h>=144);
+    opts = hs.length ? hs.map(h=>({v:h,t:label(h)})) : [{v:0,t:"Best available"}];
+    if(!opts.some(o=>o.v===state.h)) state.h = opts[0].v;
+  }
+  opts.forEach(o=>{
+    const c = document.createElement("button");
+    c.type="button"; c.className="chip"; c.textContent=o.t;
+    const cur = mode==="audio" ? state.afmt : state.h;
+    c.setAttribute("aria-pressed", o.v===cur);
+    c.onclick = ()=>{ if(mode==="audio") state.afmt=o.v; else state.h=o.v; setMode(mode); };
+    chips.appendChild(c);
+  });
+  $("#dl").textContent = mode==="audio" ? `Download ${state.afmt.toUpperCase()}` :
+    `Download ${state.h?label(state.h):""} ${mode==="mute"?"(no sound)":"MP4"}`.replace(/\s+/g," ");
+}
+
+async function download(){
+  const p = new URLSearchParams({url:state.url, mode:state.mode});
+  if(state.mode==="audio") p.set("afmt",state.afmt); else if(state.h) p.set("h",state.h);
+  const btn = $("#dl"), old = btn.textContent;
+  btn.disabled = true; btn.textContent = "Preparing file…";
+  setStatus("Preparing your file. Long videos take a little while.","load");
+  try{
+    const r = await fetch(API+"/api/download?"+p);
+    if(!r.ok){ const d = await r.json().catch(()=>({})); throw new Error(d.error||"Download failed."); }
+    const cd = r.headers.get("Content-Disposition")||"";
+    let name = "video";
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+    if(m) name = decodeURIComponent(m[1]);
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 60000);
+    setStatus("Saved: "+name);
+  }catch(e){ setStatus(e.message,"err"); }
+  finally{ btn.disabled = false; btn.textContent = old; }
+}
+
+$("#f").addEventListener("submit", e=>{ e.preventDefault(); fetchInfo(); });
+$("#paste").addEventListener("click", async ()=>{
+  try{
+    const t = (await navigator.clipboard.readText()).trim();
+    if(t){ $("#url").value = t; fetchInfo(); }
+  }catch{ $("#url").focus(); setStatus("Your browser blocked clipboard access. Press Ctrl/⌘+V in the box."); }
+});
+$("#url").addEventListener("paste", ()=>setTimeout(()=>{ if(/^https?:\/\//i.test($("#url").value.trim())) fetchInfo(); },0));
+document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>setMode(b.dataset.mode)));
+$("#dl").addEventListener("click", download);
+</script>
+</body>
+</html>
