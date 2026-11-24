@@ -98,16 +98,32 @@ crontab -e
 0 4 * * 1 cd /root/getfirefech && docker compose build --no-cache app && docker compose up -d
 ```
 
-**YouTube "Sign in to confirm you're not a bot":** YouTube sometimes blocks data-center IPs.
-Export `cookies.txt` from a logged-in browser (e.g. the "Get cookies.txt LOCALLY" extension),
-put it in the project folder, and add to the `app` service in `docker-compose.yml`:
-```yaml
-    volumes:
-      - ./cookies.txt:/app/cookies.txt:ro
-    environment:
-      - COOKIES_FILE=/app/cookies.txt
+## YouTube (how it's handled)
+
+YouTube blocks most data-center IPs ("Sign in to confirm you're not a bot"). The tool now uses
+**three layers**, in this order:
+
+1. **Server + Deno + PO tokens (automatic).** The image includes **Deno** (yt-dlp needs a JS runtime
+   for YouTube since 2025.11) and the `bgutil` service in `docker-compose.yml` hands yt-dlp
+   "proof-of-origin" tokens. Cookies are *not* used here: they conflict with PO tokens.
+2. **Cookies (optional).** Only if layer 1 is blocked and a `cookies.txt` is configured (see the
+   commented lines in `docker-compose.yml`). Export them from a **private/incognito window**, then
+   close that window right away, so YouTube doesn't rotate them.
+3. **Browser backup route (automatic, no setup).** If the server is still blocked, the page itself
+   fetches the video from public Invidious/Piped mirrors in the visitor's browser and joins video and
+   audio there with ffmpeg.wasm. This is the method the reference site uses. The mirror lists are at
+   the top of the backup-route block in `index.html` (`INVIDIOUS`, `PIPED`). Public mirrors come and go,
+   so refresh the list now and then (e.g. from https://docs.invidious.io/instances/).
+
+Check status: `curl https://yourdomain.com/api/health` → `deno: true` and `po_token_provider: true`.
+
+**Most reliable option (paid):** a residential proxy for YouTube only:
+`YTDLP_PROXY=http://user:pass@host:port docker compose up -d`.
+
+After pulling this update, rebuild everything:
+```bash
+git pull && docker compose pull && docker compose up -d --build
 ```
-then `docker compose up -d`.
 
 ## Settings
 
