@@ -46,7 +46,19 @@ MAX_DURATION = int(os.environ.get("MAX_DURATION_SECONDS", 60 * 60 * 3))  # 3 h
 URL_RE = re.compile(r"^https?://", re.I)
 
 
-def _base_opts():
+COOKIES_FILE = os.environ.get("COOKIES_FILE", "")
+POT_URL = os.environ.get("POT_PROVIDER_URL", "").rstrip("/")  # e.g. http://bgutil:4416
+PROXY = os.environ.get("YTDLP_PROXY", "")  # optional residential proxy for YouTube
+YT_RE = re.compile(r"(^|\.)(youtube\.com|youtu\.be|youtube-nocookie\.com)$", re.I)
+BOT_RE = re.compile(r"not a bot|sign in to confirm|login required|cookies", re.I)
+
+
+def is_youtube(url: str) -> bool:
+    from urllib.parse import urlparse
+    return bool(YT_RE.search(urlparse(url).hostname or ""))
+
+
+def _base_opts(url: str = "", use_cookies: bool | None = None):
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -54,10 +66,41 @@ def _base_opts():
         "restrictfilenames": False,
         "socket_timeout": 30,
     }
-    cookies = os.environ.get("COOKIES_FILE")
-    if cookies and os.path.exists(cookies):
-        opts["cookiefile"] = cookies
+    yt = is_youtube(url)
+    if yt and POT_URL:
+        opts["extractor_args"] = {"youtubepot-bgutilhttp": {"base_url": [POT_URL]}}
+    if yt and PROXY:
+        opts["proxy"] = PROXY
+    if use_cookies is None:
+        # PO tokens work best WITHOUT cookies; cookies are only a fallback for YouTube.
+        use_cookies = not (yt and POT_URL)
+    if use_cookies and COOKIES_FILE and os.path.exists(COOKIES_FILE):
+        opts["cookiefile"] = COOKIES_FILE
     return opts
+
+
+def _attempts(url):
+    """Option sets to try in order. For YouTube: PO token first, then with cookies."""
+    first = _base_opts(url)
+    tries = [first]
+    if is_youtube(url) and COOKIES_FILE and os.path.exists(COOKIES_FILE) and "cookiefile" not in first:
+        tries.append(_base_opts(url, use_cookies=True))
+    return tries
+
+
+def run_ytdlp(url, extra=None, download=False):
+    """extract_info with fallbacks. Returns info dict or raises the last error."""
+    last = None
+    for opts in _attempts(url):
+        opts = {**opts, **(extra or {})}
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(url, download=download)
+        except Exception as e:
+            last = e
+            if not BOT_RE.search(str(e)):
+                break
+    raise last
 
 
 def _need_ytdlp():
@@ -85,7 +128,24 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True, ytdlp=bool(yt_dlp), ffmpeg=bool(shutil.which("ffmpeg")))
+    pot = None
+    if POT_URL:
+        try:
+            import urllib.request
+            urllib.request.urlopen(POT_URL + "/ping", timeout=3)
+            pot = True
+        except Exception:
+            pot = False
+    return jsonify(
+        ok=True,
+        ytdlp=bool(yt_dlp),
+        ytdlp_version=getattr(getattr(yt_dlp, "version", None), "__version__", None),
+        ffmpeg=bool(shutil.which("ffmpeg")),
+        deno=bool(shutil.which("deno")),
+        po_token_provider=pot,
+        cookies=bool(COOKIES_FILE and os.path.exists(COOKIES_FILE)),
+        proxy=bool(PROXY),
+    )
 
 
 @app.post("/api/info")
@@ -98,11 +158,11 @@ def info():
     if bad:
         return jsonify(error=bad), 400
     try:
-        with yt_dlp.YoutubeDL(_base_opts()) as ydl:
-            data = ydl.extract_info(url, download=False)
+        data = run_ytdlp(url)
     except Exception as e:  # yt-dlp raises many types
         msg = str(e).replace("ERROR: ", "")
-        return jsonify(error=f"Couldn't read that link. {msg[:300]}"), 422
+        blocked = is_youtube(url) and bool(BOT_RE.search(msg))
+        return jsonify(error=f"Couldn't read that link. {msg[:300]}", youtube_blocked=blocked), 422
 
     if data.get("_type") == "playlist" and data.get("entries"):
         data = next((x for x in data["entries"] if x), data)
@@ -129,7 +189,7 @@ def info():
 
 
 def _build_opts(mode: str, height: int | None, audio_fmt: str, outdir: str):
-    opts = _base_opts()
+    opts = {}
     opts["outtmpl"] = os.path.join(outdir, "%(title).150B.%(ext)s")
     h = f"[height<={height}]" if height else ""
 
@@ -178,14 +238,12 @@ def download():
 
     outdir = tempfile.mkdtemp(prefix="gff_")
     try:
-        with yt_dlp.YoutubeDL(_base_opts()) as ydl:
-            meta = ydl.extract_info(url, download=False)
+        meta = run_ytdlp(url)
         if (meta.get("duration") or 0) > MAX_DURATION:
             shutil.rmtree(outdir, ignore_errors=True)
             return jsonify(error="That video is too long for this server."), 413
 
-        with yt_dlp.YoutubeDL(_build_opts(mode, height, audio_fmt, outdir)) as ydl:
-            ydl.download([url])
+        run_ytdlp(url, extra=_build_opts(mode, height, audio_fmt, outdir), download=True)
     except Exception as e:
         shutil.rmtree(outdir, ignore_errors=True)
         return jsonify(error=f"Download failed. {str(e).replace('ERROR: ', '')[:300]}"), 422
