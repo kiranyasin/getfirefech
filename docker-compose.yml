@@ -1,0 +1,33 @@
+# GetFireFech: app + automatic HTTPS for your domain.
+#
+#   DOMAIN=getfirefech.com docker compose up -d --build
+#
+# Caddy gets and renews a free SSL certificate automatically.
+# Leave DOMAIN empty to serve plain http on port 80 (for testing by IP).
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      - MAX_DURATION_SECONDS=${MAX_DURATION_SECONDS:-10800}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    command: caddy reverse-proxy --from ${DOMAIN:-:80} --to app:8000
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
