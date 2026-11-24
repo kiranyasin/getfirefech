@@ -20,6 +20,28 @@ except ImportError:  # lets the UI load even before deps are installed
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=None)
 
+# Comma-separated list of other websites allowed to call this API
+# (only needed if the page is hosted on a different domain than this server).
+ALLOWED_ORIGINS = {o.strip().rstrip("/") for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()}
+
+
+@app.after_request
+def _cors(resp):
+    origin = request.headers.get("Origin", "").rstrip("/")
+    if origin and ("*" in ALLOWED_ORIGINS or origin in ALLOWED_ORIGINS):
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
+        resp.headers["Vary"] = "Origin"
+    return resp
+
+
+@app.route("/api/<path:_p>", methods=["OPTIONS"])
+def _preflight(_p):
+    return ("", 204)
+
+
 MAX_DURATION = int(os.environ.get("MAX_DURATION_SECONDS", 60 * 60 * 3))  # 3 h
 URL_RE = re.compile(r"^https?://", re.I)
 
